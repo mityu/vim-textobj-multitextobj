@@ -209,6 +209,22 @@ Default:>
 	|g:textobj_multitextobj_textobjects_group_a| を使用した textobj です。
 	キーは 'E' が使用されます。
 
+<Plug>(textobj-multitextobj-apply-prev)	*<Plug>(textobj-multitextobj-apply-prev)*
+	最後に使用したリストの内、現在適用されている textobj 以前の textobj を
+	下から順に適用していき、該当する textobj が使用されます。
+	なお、適用する textobj がリストの一番上の textobj まできた場合、次に適
+	用される textobj はリストの一番下の textobj となります。
+
+	NOTE: |<Plug>(textobj-multitextobj-apply-next)| の逆順です。
+
+<Plug>(textobj-multitextobj-apply-next)	*<Plug>(textobj-multitextobj-apply-next)*
+	最後に使用したリストの内、現在適用されている textobj 以降の textobj を
+	上から順に適用していき、該当する textobj が使用されます。
+	なお、適用する textobj がリストの一番下の textobj まできた場合、次に適
+	用される textobj はリストの一番上の textobj となります。
+
+	NOTE: |<Plug>(textobj-multitextobj-apply-prev)| の逆順です。
+
 ------------------------------------------------------------------------------
 関数						*textobj-multitextobj-functions*
 
@@ -233,6 +249,25 @@ Example: >
 textobj#multitextobj#mapexpr_a({group})		*textobj#multitextobj#mapexpr_a()*
 	|g:textobj_multitextobj_textobjects_group_a| を参照する以外は
 	|textobj#multitextobj#mapexpr_i()| と同等です。
+
+texobj#multitextobj#can_apply_another()	*textobj#multitextobj#can_apply_another()*
+	|<Plug>(textobj-multitextobj-apply-prev)| もしくは
+	|<Plug>(textobj-multitextobj-apply-next)| を利用したときに、選択範囲の
+	変更が行われ得るかを取得します。
+	戻り値:
+		0 : 変更は行われません。なお、この状態で
+		    |<Plug>(textobj-multitextobj-apply-prev)| もしくは
+		    |<Plug>(textobj-multitextobj-apply-next)| を使用しても、何
+		    も起こりません。
+		1 : 適用できるものが見つかった場合、変更が行われます。
+Example: >
+	" Visualモードで g:textobj_multitextobj_textobjects_i の textobj を上
+	" から順に適用していく
+	" amt をタイプするたびに次以降の textobj が適用される
+	vmap <expr> amt textobj#multitextobj#can_apply_another() ?
+	\	'<Plug>(textobj-multitextobj-apply-next)' :
+	\	'<Plug>(textobj-multitextobj-a)'
+<
 
 
 ==============================================================================

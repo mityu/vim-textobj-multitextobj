@@ -4,13 +4,28 @@ let s:save_cpo = &cpo
 set cpo&vim
 
 
+let s:true = 1
+let s:false = !s:true
+
 function! s:uniq(list)
 	return reverse(filter(reverse(a:list), "count(a:list, v:val) <= 1"))
 endfunction
 
 
+if !exists('s:apply_in_order')
+	let s:apply_in_order = {}
+	let s:apply_in_order.available = s:false
+	let s:apply_in_order.region = []
+	let s:apply_in_order.textobjects = []
+	let s:apply_in_order.cursor_pos = []
+endif
 
 let s:nullpos = [0, 0]
+let s:t_string = type('')
+let s:t_number = type(0)
+let s:t_list = type([])
+let s:t_dict = type({})
+
 
 " a <= b
 function! s:pos_less_equal(a, b)
@@ -29,7 +44,7 @@ endfunction
 
 " begin < pos && pos < end
 function! s:is_in(range, pos)
-	return type(a:pos) == type([]) && type(get(a:pos, 0)) == type([])
+	return type(a:pos) == s:t_list && type(get(a:pos, 0)) == s:t_list
 \		 ? len(a:pos) == len(filter(copy(a:pos), "s:is_in(a:range, v:val)"))
 \		 : s:pos_less(a:range[0], a:pos) && s:pos_less(a:pos, a:range[1])
 endfunction
@@ -60,6 +75,12 @@ function! s:pos_prev(pos)
 \	]
 endfunction
 
+function! s:region_equal(lhs, rhs)
+	return a:lhs[0] ==# a:rhs[0] &&
+				\s:pos_equal(a:lhs[1][1:2], a:rhs[1][1:2]) &&
+				\s:pos_equal(a:lhs[2][1:2], a:rhs[2][1:2])
+endfunction
+
 
 function! s:as_config(config)
 	let default = {
@@ -68,21 +89,56 @@ function! s:as_config(config)
 \		"noremap" : 0,
 \	}
 	let config
-\		= type(a:config) == type("") ? { "textobj" : a:config }
-\		: type(a:config) == type({}) ? a:config
+\		= type(a:config) == s:t_string ? { "textobj" : a:config }
+\		: type(a:config) == s:t_dict ? a:config
 \		: {}
 	return extend(default, config)
 endfunction
 
 
+
 let s:region = []
 let s:wise = ""
+
+
+function! textobj#multitextobj#apply_next()
+	return s:get_region_with_another_textobj(s:true)
+endfunction
+
+function! textobj#multitextobj#apply_prev()
+	return s:get_region_with_another_textobj(s:false)
+endfunction
+
+function! s:get_region()
+	return [getpos("'[")[1:2], getpos("']")[1:2]]
+endfunction
+
+function! s:get_textobj_user_form_visual_region()
+	return [visualmode()] + map(s:get_region(),'s:to_cursorpos(v:val)')
+endfunction
+
+function! textobj#multitextobj#can_apply_another()
+	call s:check_whether_apply_another_is_available()
+	return s:apply_in_order.available
+endfunction
+
+function! s:check_whether_apply_another_is_available()
+	if !empty(s:apply_in_order.region) &&
+			\ s:apply_in_order.region[0] ==# visualmode() &&
+			\ s:region_equal(s:apply_in_order.region, s:get_textobj_user_form_visual_region())
+		let s:apply_in_order.available = s:true
+		return
+	endif
+	let s:apply_in_order.available = s:false
+endfunction
+
 function! textobj#multitextobj#region_operator(wise)
 	let reg_save = @@
 	let s:wise = a:wise
-	let s:region = [getpos("'[")[1:], getpos("']")[1:]]
+	let s:region = s:get_region()
 	let @@ = reg_save
 endfunction
+
 
 nnoremap <silent> <Plug>(textobj-multitextobj-region-operator)
 \	:<C-u>set operatorfunc=textobj#multitextobj#region_operator<CR>g@
@@ -113,7 +169,6 @@ function! textobj#multitextobj#region_from_textobj(textobj)
 	endtry
 endfunction
 
-
 function! textobj#multitextobj#regex_from_region(first, last)
 	if a:first == a:last
 		return printf('\%%%dl\%%%dc', a:first[0], a:first[1])
@@ -140,7 +195,6 @@ function! textobj#multitextobj#highlight_from_textobj(textobj, match_group)
 	execute printf("match %s /%s/", a:match_group, regex)
 endfunction
 
-
 function! s:to_cursorpos(pos)
 	if a:pos == s:nullpos
 		return [0, 0, 0, 0]
@@ -149,7 +203,7 @@ function! s:to_cursorpos(pos)
 endfunction
 
 
-function! s:select_inner(textobjects)
+function! s:get_inner_region(textobjects)
 	let regions = map(copy(a:textobjects), "textobj#multitextobj#region_from_textobj(v:val)")
 	call filter(regions, "!empty(v:val[1])")
 	let regions = filter(copy(regions), 'empty(filter(copy(regions), "s:is_in(".string(v:val[1]).", v:val[1])"))')
@@ -158,105 +212,176 @@ function! s:select_inner(textobjects)
 		return ["", []]
 	endif
 	return result
-" 	return [wise == "line" ? "V" : "v", s:to_cursorpos(region[0]), s:to_cursorpos(region[1])]
 endfunction
 
-
-function! s:select(textobjects)
-	let view = winsaveview()
-	for textobj in a:textobjects
-		if type(textobj) == type([])
-			let [wise, region] = s:select_inner(textobj)
+function! s:get_textobj_user_form_region_from_textobj(textobj)
+		if type(a:textobj) == s:t_list
+			let [wise, region] = s:get_inner_region(a:textobj)
 		else
-			let [wise, region] = textobj#multitextobj#region_from_textobj(textobj)
+			let [wise, region] = textobj#multitextobj#region_from_textobj(a:textobj)
 		endif
-		if region != []
-			if g:textobj_multitextobj_debug
-				echom string(textobj)
+		if empty(region)
+			return []
+		else
+			return [wise == "line" ? "V" : "v",
+						\s:to_cursorpos(region[0]),
+						\s:to_cursorpos(region[1])]
+		endif
+endfunction
+
+function! s:select(list_or_dict_name, group_name)
+	let s:apply_in_order.textobjects =
+				\deepcopy(s:textobjects(a:list_or_dict_name, a:group_name))
+	let s:apply_in_order.cursor_pos = getpos('.')
+	let s:apply_in_order.region = []
+	return s:get_region_by_applying_textobjects_in_order(s:true) " Use next textobj
+endfunction
+
+function! s:get_region_with_another_textobj(use_next_textobj)
+	if !textobj#multitextobj#can_apply_another()
+		return 0
+	endif
+
+	let region_save = deepcopy(s:apply_in_order.region)
+	call setpos('.', s:apply_in_order.cursor_pos)
+	let new_region =
+				\s:get_region_by_applying_textobjects_in_order(a:use_next_textobj)
+	if type(new_region) == s:t_number
+		call remove(s:apply_in_order,'region')
+		let s:apply_in_order.region = deepcopy(region_save)
+		return s:get_zero_if_empty(region_save)
+	else
+		return new_region
+	endif
+endfunction
+
+function! s:get_region_by_applying_textobjects_in_order(use_next_textobj)
+	let view = winsaveview()
+	let region = []
+	let applied = []
+	let textobjects = s:apply_in_order.textobjects  " Use a reference.
+	let found_region = s:false
+	if !a:use_next_textobj
+		call reverse(textobjects)
+	endif
+	while !empty(textobjects)
+		call add(applied, remove(textobjects, 0))
+		let textobj = applied[-1]
+
+		let region = s:get_textobj_user_form_region_from_textobj(textobj)
+		if !empty(region)
+			" Continue to search another region if new region is same to previous
+			" region (Only when apply-another).
+			if empty(s:apply_in_order.region) ||
+					\ !s:region_equal(s:apply_in_order.region, region) ||
+					\ s:apply_in_order.region[0] !=# region[0]
+				break
 			endif
-			call winrestview(view)
-			return [wise == "line" ? "V" : "v", s:to_cursorpos(region[0]), s:to_cursorpos(region[1])]
+			let s:found_region = s:true
 		endif
 		unlet textobj
-	endfor
-	return 0
+	endwhile
+	call extend(textobjects, applied)
+	if !a:use_next_textobj
+		call reverse(textobjects)  " Restore the order.
+	endif
+	call winrestview(view)
+
+	" When new region wasn't found after continue to search another region
+	" above, I return the old region.
+	if empty(region) && s:found_region
+		return s:apply_in_order.region
+	endif
+	call remove(s:apply_in_order,'region')
+	let s:apply_in_order.region = deepcopy(region)
+
+	return s:get_zero_if_empty(region)
 endfunction
 
-
-function! s:textobjects(name)
-	return s:uniq(get(b:, a:name, []) + get(g:, a:name, []))
+function! s:get_zero_if_empty(list)
+	if empty(a:list)
+		return 0
+	else
+		return a:list
+	endif
 endfunction
 
-
-function! textobj#multitextobj#select_a()
-	return s:select(s:textobjects("textobj_multitextobj_textobjects_a"))
+function! s:textobjects_default(list_name)
+	return s:uniq(get(b:, a:list_name, []) + get(g:, a:list_name, []))
 endfunction
 
-
-function! textobj#multitextobj#select_i()
-	return s:select(s:textobjects("textobj_multitextobj_textobjects_i"))
-endfunction
-
-
-function! s:textobjects_group(dict_name, key_name)
+function! s:textobjects_group(dict_name, group_name)
 	return s:uniq(
-\		get(get(b:, a:dict_name, {}), a:key_name, [])
-\	  + get(get(g:, a:dict_name, {}), a:key_name, [])
+\		get(get(b:, a:dict_name, {}), a:group_name, [])
+\	  + get(get(g:, a:dict_name, {}), a:group_name, [])
 \	)
 endfunction
 
+function! s:textobjects(list_or_dict_name, group_name)
+	if a:group_name ==# ''
+		return s:textobjects_default(a:list_or_dict_name)
+	else
+		return s:textobjects_group(a:list_or_dict_name, a:group_name)
+	endif
+endfunction
 
-for s:name in g:textobj_multitextobj_textobjects_group_list
-	execute
-\"	function! textobj#multitextobj#select_i_" . s:name . "()\n"
-\"		return s:select(s:textobjects_group('textobj_multitextobj_textobjects_group_i', " . string(s:name) . "))\n"
-\"	endfunction"
+function! textobj#multitextobj#mapexpr_i(group_name)
+	return s:mapexpr('i', a:group_name)
+endfunction
 
-	execute
-\"	function! textobj#multitextobj#select_a_" . s:name . "()\n"
-\"		return s:select(s:textobjects_group('textobj_multitextobj_textobjects_group_a', " . string(s:name) . "))\n"
-\"	endfunction"
+function! textobj#multitextobj#mapexpr_a(group_name)
+	return s:mapexpr('a', a:group_name)
+endfunction
+
+function! s:mapexpr(range_modifier, group_name)
+	let map_name = printf('(textobj-multitextobj%s%s-%s)',
+				\a:group_name, a:range_modifier, a:range_modifier)
+	if maparg('<Plug>' . map_name) ==# ''
+		call s:define_group_multitextobj(a:range_modifier, a:group_name)
+	endif
+	return "\<Plug>" . map_name
+endfunction
+
+function! s:define_group_multitextobj(range_modifier, group_name)
+	let dict_name = 'textobj_multitextobj_textobjects_group_' . a:range_modifier
+	let function_name = printf('Textobj_multitextobj_select_%s_%s()',
+				\a:range_modifier, a:group_name)
+	let com = [
+		\ 'function! ' . function_name,
+		\ 	printf('return s:select("%s", "%s")', dict_name, a:group_name),
+		\ 'endfunction'
+		\ ]
+	execute join(com, "\n")
+
+	let specs = { '-': {} }
+	let specs['-']['select-' . a:range_modifier] = ''
+	let specs['-']['select-' . a:range_modifier . '-function'] = function_name
+	call textobj#user#plugin(
+				\'multitextobj' . a:group_name . a:range_modifier,
+				\specs)
+endfunction
+
+function! textobj#multitextobj#select_a()
+	return s:select('textobj_multitextobj_textobjects_a', '')
+endfunction
+function! textobj#multitextobj#select_i()
+	return s:select('textobj_multitextobj_textobjects_i', '')
+endfunction
+
+for s:group_name in g:textobj_multitextobj_textobjects_group_list
+	for s:range_modifier in ['a','i']
+		let s:dict_name = 'textobj_multitextobj_textobjects_group_' . s:range_modifier
+		let s:function_name = printf('textobj#multitextobj#select_%s_%s()',
+					\s:range_modifier, s:group_name)
+		let s:com = [
+			\ 'function! ' . s:function_name,
+			\ 	printf('return s:select("%s", "%s")', s:dict_name, s:group_name),
+			\ 'endfunction'
+			\ ]
+		execute join(s:com, "\n")
+	endfor
 endfor
-unlet s:name
-
-
-function! textobj#multitextobj#mapexpr_i(group)
-	let name = printf("<Plug>(textobj-multitextobj%si-i)", a:group)
-	if !empty(maparg(name))
-		return "\<Plug>(textobj-multitextobj". a:group . "i-i)"
-	endif
-	execute
-\"	function! Textobj_multitextobj_select_i_" . a:group . "()\n"
-\"		return s:select(s:textobjects_group('textobj_multitextobj_textobjects_group_i', " . string(a:group) . "))\n"
-\"	endfunction"
-	call textobj#user#plugin('multitextobj' . a:group . "i", {
-\		"-" : {
-\			'select-i': '',
-\			'select-i-function': "Textobj_multitextobj_select_i_" . a:group,
-\		}
-\	})
-	return "\<Plug>(textobj-multitextobj". a:group . "i-i)"
-endfunction
-
-
-function! textobj#multitextobj#mapexpr_a(group)
-	let name = printf("<Plug>(textobj-multitextobj%sa-a)", a:group)
-	if !empty(maparg(name))
-		return "\<Plug>(textobj-multitextobj". a:group . "a-a)"
-	endif
-	execute
-\"	function! Textobj_multitextobj_select_a_" . a:group . "()\n"
-\"		return s:select(s:textobjects_group('textobj_multitextobj_textobjects_group_a', " . string(a:group) . "))\n"
-\"	endfunction"
-	call textobj#user#plugin('multitextobj' . a:group . "a", {
-\		"-" : {
-\			'select-a': '',
-\			'select-a-function': "Textobj_multitextobj_select_a_" . a:group,
-\		}
-\	})
-	return "\<Plug>(textobj-multitextobj". a:group . "a-a)"
-endfunction
-
+unlet s:group_name s:range_modifier s:dict_name s:function_name s:com
 
 
 let &cpo = s:save_cpo
