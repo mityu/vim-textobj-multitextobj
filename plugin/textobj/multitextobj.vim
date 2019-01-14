@@ -40,14 +40,6 @@ let s:textobj_dict = {
 \        'select-function': 'textobj#multitextobj#apply_next',
 \      },
 \}
-"let s:textobj_dict = {
-\      '-': {
-\        'select-a': '',
-\        'select-a-function': function('textobj#multitextobj#select', ['textobj_multitextobj_textobjects_a', '']),
-\        'select-i': '',
-\        'select-i-function': function('textobj#multitextobj#select', ['textobj_multitextobj_textobjects_i', '']),
-\      },
-\}
 
 for s:name in g:textobj_multitextobj_textobjects_group_list
 	let s:textobj_dict[s:name] = {
