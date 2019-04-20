@@ -19,6 +19,9 @@ if !exists('s:apply_in_order')
 	let s:apply_in_order.textobjects = []
 	let s:apply_in_order.cursor_pos = []
 endif
+if !exists('s:added_groups')
+	let s:added_groups = []
+endif
 
 let s:nullpos = [0, 0]
 let s:t_string = type('')
@@ -325,40 +328,20 @@ function! s:textobjects(list_or_dict_name, group_name)
 	endif
 endfunction
 
-function! textobj#multitextobj#mapexpr_i(group_name)
-	return s:mapexpr('i', a:group_name)
-endfunction
-
-function! textobj#multitextobj#mapexpr_a(group_name)
-	return s:mapexpr('a', a:group_name)
-endfunction
-
-function! s:mapexpr(range_modifier, group_name)
-	let map_name = printf('(textobj-multitextobj%s%s-%s)',
-				\a:group_name, a:range_modifier, a:range_modifier)
-	if maparg('<Plug>' . map_name) ==# ''
-		call s:define_group_multitextobj(a:range_modifier, a:group_name)
+function! textobj#multitextobj#register_group_impl(range_modifier, group_name)
+	if index(s:added_groups, a:group_name) != -1
+		return ''
 	endif
-	return "\<Plug>" . map_name
-endfunction
-
-function! s:define_group_multitextobj(range_modifier, group_name)
 	let dict_name = 'textobj_multitextobj_textobjects_group_' . a:range_modifier
-	let function_name = printf('Textobj_multitextobj_select_%s_%s()',
-				\a:range_modifier, a:group_name)
-	let com = [
-		\ 'function! ' . function_name,
-		\ 	printf('return s:select("%s", "%s")', dict_name, a:group_name),
-		\ 'endfunction'
-		\ ]
-	execute join(com, "\n")
-
+	let function_name = printf('textobj#multitextobj#select_%s_%s',
+\		a:range_modifier, a:group_name)
+	let g:[function_name] = function('s:select', [dict_name, a:group_name])
 	let specs = { '-': {} }
 	let specs['-']['select-' . a:range_modifier] = ''
 	let specs['-']['select-' . a:range_modifier . '-function'] = function_name
 	call textobj#user#plugin(
-				\'multitextobj' . a:group_name . a:range_modifier,
-				\specs)
+\			'multitextobj' . a:group_name . a:range_modifier, specs)
+	return ''
 endfunction
 
 function! textobj#multitextobj#select_a()
@@ -367,21 +350,6 @@ endfunction
 function! textobj#multitextobj#select_i()
 	return s:select('textobj_multitextobj_textobjects_i', '')
 endfunction
-
-for s:group_name in g:textobj_multitextobj_textobjects_group_list
-	for s:range_modifier in ['a','i']
-		let s:dict_name = 'textobj_multitextobj_textobjects_group_' . s:range_modifier
-		let s:function_name = printf('textobj#multitextobj#select_%s_%s()',
-					\s:range_modifier, s:group_name)
-		let s:com = [
-			\ 'function! ' . s:function_name,
-			\ 	printf('return s:select("%s", "%s")', s:dict_name, s:group_name),
-			\ 'endfunction'
-			\ ]
-		execute join(s:com, "\n")
-	endfor
-endfor
-unlet s:group_name s:range_modifier s:dict_name s:function_name s:com
 
 
 let &cpo = s:save_cpo
