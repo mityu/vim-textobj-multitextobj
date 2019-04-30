@@ -34,7 +34,7 @@ let g:textobj_multitextobj_textobjects_group_i
 let g:textobj_multitextobj_textobjects_group_a
 \	= get(g:, "textobj_multitextobj_textobjects_group_a", {})
 let g:textobj_multitextobj_textobjects_group_list
-\	= get(g:, "textobj_multitextobj_group_list", [])
+\	= get(g:, "textobj_multitextobj_textobjects_group_list", [])
 
 
 let s:textobj_dict = {
@@ -56,7 +56,7 @@ let s:textobj_dict = {
 
 call textobj#user#plugin('multitextobj', s:textobj_dict)
 
-for group_name in g:textobj_multitextobj_group_list
+for group_name in g:textobj_multitextobj_textobjects_group_list
 	call textobj#multitextobj#register_group(group_name)
 endfor
 
